@@ -22,7 +22,13 @@ async function callGemini(prompt, retries = 3) {
     const res = await fetch(url, {
       method: "POST",
       headers: { "x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 4096,
+        },
+      }),
     });
     if (res.ok) {
       const data = await res.json();
@@ -125,11 +131,25 @@ Requirements:
 - Write 3 concise, high-signal tests based on the ticket.
 - In test.afterEach(async ({ page }, testInfo) => { ... }), if testInfo.status !== testInfo.expectedStatus, save a fullPage PNG screenshot to "${ARTIFACTS_DIR.replace(/\\/g, "/")}/" + testInfo.title.replace(/[^a-z0-9]/gi, "_") + ".png".
 - Output ONLY raw JavaScript code. No markdown fences, no explanation.`;
+  let validSyntax = false;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const rawCode = await callGemini(prompt);
+    const fenced = rawCode.match(/```(?:javascript|js)?\n([\s\S]*?)```/i);
+    const cleanCode = (fenced ? fenced[1] : rawCode).trim();
+    fs.writeFileSync(SPEC_PATH, cleanCode, "utf8");
+    try {
+      execSync(`node --check "${SPEC_PATH}"`, { stdio: "pipe" });
+      validSyntax = true;
+      console.log(`   Saved valid spec -> ${SPEC_PATH}`);
+      break;
+    } catch (syntaxErr) {
+      console.warn(`   Attempt ${attempt} produced invalid JS syntax — retrying...`);
+    }
+  }
 
-  const rawCode = await callGemini(prompt);
-  const cleanCode = rawCode.replace(/^```[a-z]*\n?/i, "").replace(/```$/i, "").trim();
-  fs.writeFileSync(SPEC_PATH, cleanCode, "utf8");
-  console.log(`   Saved generated spec -> ${SPEC_PATH}`);
+  if (!validSyntax) {
+    throw new Error("AI failed to generate valid JavaScript after 2 attempts. Aborting without filing a false Jira bug.");
+  }
 
   console.log("3. Running Playwright headlessly...");
   let output = "";
