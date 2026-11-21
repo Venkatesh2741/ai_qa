@@ -1,0 +1,57 @@
+name: Autonomous AI QA Agent
+
+on:
+  repository_dispatch:
+    types: [jira-ready-for-qa]
+  workflow_dispatch:
+    inputs:
+      ticket_key:
+        description: "Jira Ticket Key (e.g. SCRUM-5)"
+        required: true
+      target_url:
+        description: "Target URL to test"
+        required: false
+        default: "https://www.jkctutorials.com"
+
+jobs:
+  run-ai-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Headless AI QA Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET_KEY: ${{ github.event.client_payload.ticket_key || inputs.ticket_key }}
+          TARGET_URL: ${{ github.event.client_payload.target_url || inputs.target_url || 'https://www.jkctutorials.com' }}
+        run: |
+          echo "Running AI QA Agent for ticket: $TICKET_KEY against $TARGET_URL"
+          node qa-agent.js "$TICKET_KEY" "$TARGET_URL"
+
+      - name: Upload failure screenshots & generated spec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-qa-artifacts-${{ github.run_id }}
+          path: |
+            test-artifacts/
+            tests/ai-generated.spec.js
+          if-no-files-found: ignore
